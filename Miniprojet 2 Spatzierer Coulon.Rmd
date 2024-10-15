@@ -1,0 +1,429 @@
+---
+title: "Miniprojet 2"
+author: "Spatzierer Laura, Coulon Martin"
+date: "2024-03-11"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+Consignes : L'objectif de ce travail à rendre -par groupe de 2 ou 3- avant le 15 mars est de produire une analyse de données utilisant la notion de régression linéaire et ou d'ANOVA. À partir des données jointes, étudier l'influence des différentes variables sur les salaires. On s'attachera tout particulièrement à déterminer s'il y a un effet de genre. On commencera par une analyse exploratoire des données.
+
+```{r}
+#Importation des librairies et des données
+
+library(tidyverse)
+library(lmtest)
+
+data <- read.csv("salaires.csv")
+data <- na.omit(data)
+data <- data[data$Education.Level != "", ]
+glimpse(data)
+```
+
+Les données à notre dispositions nous indiquent le salaires de 6698 travailleurs. A ces données s'ajoutent des informations individualisées sur le genre, l'âge, le niveau de diplôme, l'intitulé du poste et l'année d'expérience pour chaque individus.
+
+Les données soumises à notre analyse sont bien ordonnées et facilement exploitables à première vue. Nous ne disposons pas d'informations sur les modalités de collectes de ces données, nous n'avons également pas d'information sur notre échantillon. Nous allons donc dans un premier temps explorer notre population. L'objectif de cette première phase exploratoire est de connaitre le degré de représentativité si notre échantillon.
+
+# Analyse de la population de l'échantillon :
+
+#### Répartition genrée :
+
+Commençons donc par connaitre la répartition genrée de notre échantillon.
+
+```{r}
+
+var <- data %>%
+  group_by(Gender) %>%
+  summarise(Total_Genre = n(),
+            Salaire_Moyen_Tête = sum(Salary)/ Total_Genre) %>%
+  mutate(Proportion = Total_Genre / sum(Total_Genre)) %>%
+
+print(var)
+```
+
+Notre population est composée d'environ 55% d'hommes et de 45% de femmes, 0.002% de notre population ne s'identifie pas à l'une de ces deux modalités et à répondu "autre". Il pourrait être intéressant de s'intéresser à ces 14 répondants. Néanmoins au vu du faible nombre de répondant dans la catégorie "autre" nos résultats auront certainement une robustesse faible.
+
+A première vue notre échantillon est donc sureprésentée par des individus s'identifiant au genre masculin. De plus on observe à première vu que le salaire moyen des hommes est plus élevé que celui des femmes.
+
+#### Répartition des postes des travailleurs :
+
+Une colonne de notre tableau nous indique les postes de chaque travailleur. Cette donnée bien que complexe à exploiter est extrêmement pertinente pour notre analyse. Elle va nous permettre de produire un raisonnement bien plus solide en comparant les salaires des travailleurs d'un même poste selon les variables à notre disposition.
+
+De plus, nous allons ainsi pouvoir comparer différent secteur professionnel pour voir si l'un des domaines est potentiellement plus inégalitaire qu'un autre. Commençons par examiner les différents postes.
+
+------------------------------------------------------------------------
+
+```{r}
+#Analyse du nombre de postes différents.
+job_counts <- count(data, Job.Title)
+summary(job_counts)  
+```
+
+En tout on observe 191 postes différents sur notre ensemble de répondant. On observe néanmoins qu'un ensemble relativement important d'individus partagent le même poste. 518 répondants appartiennent d'ailleurs à un même poste. De plus l'écart entre la médiane et la moyenne nous indique la présence de valeur extrêmes. Nous allons donc rédiger un code nous permettant d'isoler les postes partagés par plus de 50 répondants. Nous allons afficher les postes par ordre décroissant afin de rapidement identifier la population des répondants et la diversité des profils répondants.
+
+Nous essayerons donc dans une partie plus détaillée de notre analyse de nous concentrer sur les postes dans lesquelles travaillent plus de 50 individus. Nous allons donc déjà créer un sous-tableau isolant les travailleurs répondant à ce critère de sélection.
+
+```{r}
+job_nombreux <- data %>%
+  group_by(Job.Title) %>%
+  summarise(total_travailleur =n(), Salaire_Moyen_Tête = sum(Salary)/total_travailleur) %>%
+  filter(total_travailleur > 50) %>%
+  arrange(desc(total_travailleur))
+print(job_nombreux)
+print(sum(job_nombreux$total_travailleur))
+
+```
+
+On obtient un nouvel ensemble de 5846 travailleurs qui partagent le même poste que plus de 50 travailleurs. Nous utiliserons ce sous-ensemble plus tard.
+
+On observe une sureprésentation de profils issue du domaine scientifique. Une majorité de nos répondants sont des ingénieurs travaillant dans les développement logiciel, web ou des professionnels de l'analyse de données. On observe également un grand nombre de profils travaillant dans le management et le commerce.
+
+Globalement les données récoltées sont donc issue d'individus travaillant dans la programmation logiciel, web et la Data ainsi que des individus travaillant dans le commerce et le management. Tout nous indique donc à penser qu'il s'agit donc d'individus avec des niveaux de diplômes relativement élevés. La représentation masculine est relativement surprenante, on aurait pu attendre une proportion encore plus importante dans ce secteur encore très genrée.
+
+Répartition Age :
+
+```{r}
+var <- data %>%
+  group_by(Age) %>%
+  na.omit(var) %>%
+  summarise(n = n(),
+            Salaire_Moyen_Tête = sum(Salary)/ n) %>%
+  mutate(Proportion = n / sum(n)) %>%
+
+print(var)
+
+
+sum(var$Proportion[1:13])
+rm(var)
+
+
+```
+
+Nos répondants ont entre 21 et 61 ans, on observe que notre population a majoritairement entre 24 et 35 ans. La proportion de répondants ayant plus de 50 ans tend à diminuer fortement. Nos répondants sont donc d'âge divers, on observe à première vue que le salaire des répondants les plus âgées croit sensiblement entre 46 et 48 ans. On observe que le salaire des individus ayant entre 21 et 22 ans est sensiblement plus faible qu'à partir de 23 ans. Ceci peut-être expliqué par le niveau de diplôme plus faible des individus travaillant avant 23 ans. Globalement il semble donc possible d'observer une augmentation du revenu avec l'âge.
+
+#### Répartition niveau de diplôme :
+
+Intéressons-nous désormais au niveau de diplômes de nos répondants. Au vu des données que nous avons pu explorer jusqu’à présent nous devrions avoir une population plutôt très diplômées.
+
+```{r}
+var <- count(data, Education.Level) %>%
+  na.omit(var) %>%
+  mutate(Proportion = n / sum(n))
+print(var)
+rm(var)
+
+
+```
+
+On remarque des doublons dans nos niveau de diplôme lié à des soucis de nettoyage des données. Des modalités identiques sont orthographiés différemment. Nous allons donc procéder à une rectification de ces erreurs.
+
+```{r}
+data <- data %>%
+  mutate(Education.Level = recode_factor(Education.Level,
+                                         "Bachelor's" = "Bachelor's Degree",
+                                         "Master's" = "Master's Degree",
+                                         "phD" = "PhD"))
+
+var <- data %>%
+  group_by(Education.Level) %>%
+  summarise(Total_Diplomé = n(),
+            Salaire_Moyen_Tête = sum(Salary)/ Total_Diplomé) %>%
+  mutate(Proportion = Total_Diplomé / sum(Total_Diplomé)) %>%
+  arrange(Salaire_Moyen_Tête)
+
+print(var)
+
+```
+
+On remarque que l'ensemble des répondants sont diplomés. En 2022, aux USA 10% des américains n'avaient aucun diplôme (US Census Bureau, 2022). De plus, le nombre de répondant ayant un PhD ou un Master's Degree présent dans notre échantillon est très élevé, 48%. A première vue, il nous semble probable que l'échantillon à notre disposition ait été collecté aux USA ou du moins dans un pays d'Amérique du Nord. Nous n'avons néanmoins aucun moyen de démontrer cette hypothèse. Si ce n'est qu'une enquête de ce type serait bien plus simple à réaliser dans la Silicone Valley qu'ailleurs et que le codage des diplômes est similaire au système éducatif américain. De plus les salaires élevés semblent valider notre hypothèse.
+
+On observe à première vue que le salaire moyen par travailleur selon le niveau de diplôme croit avec le niveau de formation. A première vue le niveau de diplôme a donc un rôle important. Les individus ayant un PHD ont en moyenne un revenu 4.5 fois plus important que les individus ayant seulement un niveau High School équivalent au bac.
+
+#### Répartition années d'expérience :
+
+```{r}
+var <- data %>%
+  group_by(Years.of.Experience) %>%
+  na.omit(var) %>%
+  summarise(n = n(),
+            Salaire_Moyen_Tête = sum(Salary)/ n) %>%
+  mutate(Proportion = n / sum(n)) %>%
+
+print(var)
+
+
+sum(var$Proportion[1:13])
+rm(var)
+
+```
+
+On observe ici une part relativement importante de répondant ayant entre 1 et 19 ans d'expérience. Les individus ayant plus de 20 ans d'expériences sont moins nombreux quant à eux. On observe que le salaire aurait tendance à augmenter avec le temps durant les premières années d'expérience. Nos tests pourrons confirmer ou non cette observation
+
+Notre échantillon est donc représenté par une majorité d'homme, la représentativité féminine reste néanmoins relativement élevé pour les secteurs d'activités de nos répondant.es. Le niveau de diplôme de nos répondant.es est un niveau de diplôme élevé ce qui est cohérent avec les postes qu'occupent nos répondant.es.
+
+# Début de l'analyse :
+
+Nous allons tester nos données pour chercher si une relation entre le salaire et les autres variable existe.
+
+Commençons par vérifier si nos variables suivent des lois normales et répondent aux critères d'homoscédasticité afin de pouvoir effectuer une analyse ANOVA et des régressions. Pour ce faire nous allons utiliser le test de Lilliefors.
+
+Notre hypothèse H0 est que le salaire est distribué en suivant une loi normale, l'hypothèse H1 est que la distribution du salaire ne suit pas une loi normale.
+
+```{r}
+# Histogramme des salaires
+hist(data$Salary, breaks = 20, main = "Distribution des salaires", xlab = "Salaire")
+# Test de normalité de Lilliefors pour un grand échantillon
+library(nortest)
+lillie.test(data$Salary)
+
+
+```
+
+D'après les résultats de notre test et la visualisation graphique des salaires, nous pouvons observer que nos données ne suivent pas de loi normale. La valeur-p du test est extrêmement petite, bien en dessous du seuil de signification communément utilisé de 0,05. Cela signifie que nous rejetons l'hypothèse nulle selon laquelle les données suivent une distribution normale. En d'autres termes, les salaires dans votre échantillon ne sont pas distribués selon une loi normale.
+
+Cette situation est plutôt problématique puisque la normalité est un critère important dans la réalisation d'ANOVA et la réalisation de modèle de régression. Néanmoins notre échantillon étant d'une taille importante, en l'occurrence 6698 individus, il nous semble possible de proposer un exercice d'ANOVA et de régression. Nos résultats ne seront pas de la plus grande robustesse mais nous aiderons tout de même à valider nos hypothèses.
+
+Commençons par effectuer une série d'Analyse de Variance (ANOVA) afin d'identifier les variables pouvant influencer le plus les salaires. Nous compléterons ce travail par une régression multiple afin de fournir un travail le plus robuste possible.
+
+#### **ANOVA pour le genre :**
+
+Afin de fournir une analyse la plus robuste possible nous allons éviter de prendre en compte la catégorie "autre" parmi nos répondants. Son effectif de 14 est trop faible et pourrait gêner nos résultats.
+
+Notre Anova vise à vérifier si le genre à un impact sur les salaires, ou si nos données démontrent aux contraires que pour des situations professionnelles similaires en terme d'âge, de niveau de diplôme, de poste et d'années d'expérience des individus avec des genres différents ont un écart de salaire.
+
+-   Formule nulle (H0) : Il n'y a pas de différence significative de salaire entre les genres.
+
+-   Formule alternative (H1) : Il existe une différence significative de salaire entre les genres.
+
+    ```{r}
+    # Filtrage
+    data_filtered <- data %>% 
+      filter(Gender %in% c("Male", "Female"))
+
+    #Anova Genre
+    anova_genre <- aov(Salary ~ Gender, data = data_filtered)
+    summary(anova_genre)
+    ```
+
+Les résultats de l'analyse de variance (ANOVA) indiquent que le genre a un effet significatif sur les salaires dans notre échantillon. Plus précisément, l'effet du genre sur les salaires est statistiquement significatif (F(1, 6682) = 110, p \< 0,001).
+
+Cela signifie que, après avoir contrôlé les autres variables, il existe une différence significative de salaire entre les genres masculin et féminin. En d'autres termes, même en tenant compte des autres facteurs tels que le niveau de diplôme, le poste ou les années d'expérience, le genre reste un facteur déterminant dans la détermination des salaires.
+
+Ces résultats valident l'hypothèse selon laquelle le genre a un impact sur les salaires. Ils mettent en lumière les disparités salariales entre les genres dans notre échantillon. Cette validation souligne l'importance de prendre des mesures pour réduire les écarts de rémunération entre les hommes et les femmes et promouvoir l'égalité des chances sur le lieu de travail.
+
+En conclusion, cette analyse statistique confirme empiriquement l'existence de disparités salariales basées sur le genre dans notre échantillon, renforçant ainsi l'argument en faveur de l'équité salariale et de l'élimination des discriminations basées sur le genre dans le milieu professionnel.
+
+#### **ANOVA pour le niveau de diplôme :**
+
+-   Formule nulle (H0) : Il n'y a pas de différence significative de salaire entre les niveaux de diplôme.
+
+-   Formule alternative (H1) : Il existe une différence significative de salaire entre les niveaux de diplôme.
+
+```{r}
+# ANOVA pour le niveau de diplôme
+anova_education <- aov(Salary ~ Education.Level, data = data_filtered)
+summary(anova_education)
+
+```
+
+Les résultats de l'analyse de variance (ANOVA) indiquent que le niveau de diplôme a un effet significatif sur les salaires dans notre échantillon la F-Value est très faible (1662) ainsi que la valeur p (\< 0,001).
+
+Ces résultats confirment l'hypothèse selon laquelle le niveau de diplôme a un impact sur les salaires. Ils mettent en évidence les disparités salariales entre les individus ayant des niveaux de diplôme différents dans notre échantillon. Cette validation souligne l'importance de reconnaître l'éducation comme un facteur clé dans la détermination des rémunérations et appuie l'idée de politiques visant à améliorer l'accès à l'éducation et à réduire les inégalités salariales basées sur le niveau de diplôme.
+
+En conclusion, cette analyse statistique met en lumière l'importance du niveau de diplôme dans la détermination des salaires et renforce l'argument en faveur de politiques éducatives et de travail visant à réduire les disparités salariales basées sur l'éducation.
+
+#### **ANOVA pour le poste :**
+
+-   Formule nulle (H0) : Il n'y a pas de différence significative de salaire entre les postes.
+
+-   Formule alternative (H1) : Il existe une différence significative de salaire entre les postes.
+
+```{r}
+# ANOVA pour le poste
+anova_job <- aov(Salary ~ Job.Title, data = data_filtered)
+summary(anova_job)
+```
+
+Les résultats de l'analyse de variance (ANOVA) indiquent que le poste occupé par les individus a un effet significatif sur les salaires dans notre échantillon (F = 67,59 , p \< 0,001).
+
+Ces résultats confirment l'hypothèse selon laquelle le poste occupé a un impact sur les salaires. Ils mettent en évidence les disparités salariales entre les individus occupant des postes différents dans notre échantillon. Cette validation souligne l'importance de reconnaître le rôle du poste de travail dans la détermination des rémunérations et appuie l'idée de politiques visant à assurer une rémunération équitable et à réduire les inégalités salariales entre les différents postes.
+
+#### Anova pour le niveau d'expérience :
+
+-   Hypothèse nulle (H0) : Il n'y a pas de différence significative de salaire entre les différentes années d'expérience.
+
+-   Hypothèse alternative (H1) : Il existe une différence significative de salaire entre les différentes années d'expérience.
+
+```{r}
+# ANOVA pour les années d'expérience
+anova_experience <- aov(Salary ~ Years.of.Experience, data = data_filtered)
+summary(anova_experience)
+
+```
+
+Les résultats de l'analyse de variance (ANOVA) indiquent que les années d'expérience ont un effet significatif sur les salaires dans notre échantillon (F = 12835, p \< 0,001).
+
+Ces résultats confirment l'hypothèse alternative selon laquelle il existe une différence significative de salaire entre les différentes années d'expérience. En d'autres termes, les années d'expérience ont un effet significatif sur les salaires dans notre échantillon.
+
+Désormais nous avons pu démontrer que chacune des variables présentes semblent avoir un impact sur le niveau de salaire. Nous allons désormais chercher à identifier et classer l'impact des variables pour chercher les variables les plus "lourdes" dans la détermination des salaires.
+
+#### Régression Linéaire :
+
+Nous allons réaliser une régression linéaire visant à modéliser l'impact de l'âge, du genre, des années d'expériences et du niveau de diplôme, ainsi que le poste du répondant. Notre objectif est de voir si ces variables semblent avoir un effet global ou non et d'identifier les variables les plus importantes.
+
+Pour effectuer une régression solide nous n'allons sélectionner que les postes partagées par plus de 50 travailleurs. Notre nombre de répondant passe donc à 5832.
+
+```{r}
+# Régression Linéaire Multiple
+data_filtered <- data_filtered %>% 
+  group_by(Job.Title) %>%
+  mutate(Job.Title_Count = n()) %>%
+  ungroup() %>%
+  filter(Job.Title_Count > 50)
+
+# Régression linéaire des salaires en fonction de l'âge, du genre et du niveau de diplôme
+modele_regression <- lm(Salary ~ Age + Gender + Education.Level + Years.of.Experience + Job.Title, data = data_filtered)
+
+# Afficher les résultats de la régression
+summary(modele_regression)
+
+
+```
+
+\
+Notre modèle de régression linéaire multiple fournit des informations sur l'importance des variables correspondantes dans l'explication des salaires, tout en tenant compte des titres de poste.
+
+Notre intercept représente le salaire moyen lorsque toutes les autres variables explicatives sont nulles. Dans ce cas, l'intercept est de 54970.81. Cela signifie que si un individu avait zéro ans d'expérience, aucun diplôme, aucun âge, aucune différence de genre et aucun titre de poste spécifique, son salaire moyen serait d'environ 54970.81 dollars. Cette situation est hypothétique et impossible dans la réalité, car tout les individus auront des valeurs différentes pour ces variables explicatives.
+
+L'intercept nous fournit simplement une référence de base à partir de laquelle les effets des autres variables peuvent être interprétés. Un salaire aussi élevé peut sembler surprenant mais au vu de l'origine géographique probable de notre population elle ne nous surprend guère.
+
+D'après notre modèle de régression, pour chaque année d'augmentation de l'âge, le salaire augmente en moyenne de 585.27 dollars. Le p-value très faible (\< 2e-16) indique que l'âge est statistiquement significatif.
+
+Les individus de genre masculin ont en moyenne un salaire plus élevé de 461.91 dollars par rapport aux individus de genre féminin, mais ce coefficient n'est pas statistiquement significatif (p-value = 0.489803). Ainsi nous ne pouvons pas affirmer que le genre a un impact significatif dans notre modèle de régression. Cette donnée est à prendre avec beaucoup de précaution.
+
+Les diplômés d'un Master's Degree ont en moyenne un salaire plus élevé de 5706.91 dollars par rapport à ceux ayant un Bachelor's Degree (qui est la référence). Les individus avec un doctorat (PhD) ont en moyenne un salaire plus élevé de 6095.85 dollars par rapport à ceux ayant un Bachelor's Degree. Les individus ayant seulement un diplôme de High School ont en moyenne un salaire plus bas de 21602.50 dollars par rapport à ceux ayant un Bachelor's Degree. Tous les p-values associés à ces niveaux de diplôme sont très faibles (\< 2e-16), ce qui indique qu'ils sont statistiquement significatifs. En d'autre terme le niveau de diplôme joue un rôle important dans la détermination du salaire.
+
+Pour chaque année d'augmentation de l'expérience, le salaire augmente en moyenne de 4645.65 dollars. Le p-value est très faible, ce qui indique que les années d'expérience sont statistiquement significatives.
+
+Enfin, les coefficients associés à chaque postes indiquent l'effet de ce titre sur le salaire, par rapport aux job de référence qui est Content Marketing Manager. Certains titres de poste ont des coefficients statistiquement significatifs avec des p-values très faibles, tandis que d'autres sont moins significatifs avec des p-values plus élevées.
+
+Le coefficient de détermination multiple (R² ajusté) de notre modèle est de 0.8161, ce qui signifie que le modèle expliquerait environ 81.61% de la variation des salaires.
+
+Le test F (F-statistic) a une valeur très élevée (602.8) avec un p-value extrêmement faible (\< 2.2e-16), ce qui indique que le modèle dans son ensemble est statistiquement significatif.
+
+En conclusion, chaque variable dans notre modèle semble jouer un rôle important dans l'explication des salaires, avec des niveaux de diplôme, des années d'expérience et des titres de poste ayant des effets particulièrement significatifs. Le genre, cependant, ne semble pas avoir un effet significatif sur le salaire une fois que les autres variables sont prises en compte dans le cadre de notre population.
+
+```{r}
+# Obtenir les résidus du modèle
+residuals <- resid(modele_regression)
+
+# Obtenir les valeurs prédites du modèle
+predicted_values <- predict(modele_regression)
+
+# Tracer le nuage de points des résidus par rapport aux valeurs prédites
+plot(predicted_values, residuals, xlab = "Valeurs Prédites", ylab = "Résidus", main = "Homoscédasticité des Résidus")
+
+# Ajouter une ligne horizontale à zéro pour aider à identifier les résidus distribués uniformément
+abline(h = 0, col = "red")
+
+# Vous pouvez également utiliser un test formel comme le test de Breusch-Pagan ou le test de White
+bptest(modele_regression)
+
+```
+
+Notre analyse des résidus indique que notre régression ne satisfait pas l'hypothèse d'homoscédasticité. Notre régression linéaire semble donc à première vue peu robuste.
+
+#### Comparer ce qui est comparable :
+
+```{r}
+# Filtrer les données pour les observations où les individus ont le même âge, diplôme, expérience et poste, mais des genres différents
+same_profile_data <- data_filtered %>%
+  group_by(Age, Education.Level, Years.of.Experience, Job.Title) %>%
+  filter(n_distinct(Gender) == 2) %>%
+  ungroup()
+
+# Calculer les différences de salaire entre hommes et femmes pour chaque groupe
+salary_diff <- same_profile_data %>%
+  summarise(salary_diff_median = median(Salary[Gender == "Female"]) - median(Salary[Gender == "Male"]),
+            salary_diff_mean = mean(Salary[Gender == "Female"]) - mean(Salary[Gender == "Male"]))
+
+# Afficher les résultats
+print(salary_diff)
+
+library(ggplot2)
+
+# Créer un histogramme des salaires
+ggplot(data_filtered, aes(x = Salary)) +
+  geom_histogram(binwidth = 1000, fill = "skyblue", color = "black") +
+  labs(title = "Distribution des salaires",
+       x = "Salaire",
+       y = "Fréquence")
+
+# Créer un boxplot des salaires
+ggplot(data_filtered, aes(y = Salary)) +
+  geom_boxplot(fill = "skyblue", color = "black") +
+  labs(title = "Distribution des salaires",
+       x = "",
+       y = "Salaire")
+
+
+
+```
+
+```{r}
+
+# Calculer la différence de salaire médiane entre les hommes et les femmes pour chaque poste
+salary_diff_by_job <- same_profile_data %>%
+  group_by(Job.Title) %>%
+  summarise(salary_diff_median = median(Salary[Gender == "Female"]) - median(Salary[Gender == "Male"]))
+
+# Trier les postes par ordre de différence de salaire médiane décroissante
+salary_diff_by_job <- salary_diff_by_job %>%
+  arrange(desc(salary_diff_median))
+
+# Afficher les 10 postes avec les plus grandes différences de salaire médiane
+head(salary_diff_by_job, 10)
+
+# Calculer la différence de salaire moyen entre les hommes et les femmes pour chaque poste
+salary_diff_mean_by_job <- same_profile_data %>%
+  group_by(Job.Title) %>%
+  summarise(salary_diff_mean = mean(Salary[Gender == "Female"]) - mean(Salary[Gender == "Male"]))
+
+# Trier les postes par ordre de différence de salaire moyen décroissante
+salary_diff_mean_by_job <- salary_diff_mean_by_job %>%
+  arrange(desc(salary_diff_mean))
+
+# Afficher les 10 postes avec les plus grandes différences de salaire moyen
+head(salary_diff_mean_by_job, 40)
+
+
+```
+
+On observe que des différences énormes de salaires existent entre des femmes et des hommes ayant pour seule différence leur genre.
+
+Le cas le plus extrême étant celui des "Product Manager", des "Marketing Manager" avec des valeurs abberantes. Les sciences ne sont pas en reste puisque les métiers de Data Scientist, d'ingénieur logiciel, d'ingénieur de projet senior ou encore de développeur ont eux aussi des différences significatives bien que moindre. D'un autre coté les femmes semblent avoir de meilleur salaires dans d'autres secteurs et postes.
+
+Globalement notre analyse démontre des différences forte de salaire selon le genre pour des postes spécifiques.
+
+# Conclusion et bilan :
+
+La présente étude a permis d'analyser l'influence de différentes variables sur les salaires des travailleurs, en mettant particulièrement l'accent sur l'effet du genre. À travers une approche exploratoire des données, nous avons examiné la répartition des variables telles que le genre, l'âge, le niveau de diplôme, le poste et les années d'expérience parmi les répondants.
+
+Premièrement, notre analyse a révélé une représentation disproportionnée des hommes dans notre échantillon, bien que la proportion de femmes reste relativement élevée pour les secteurs d'activité de nos répondants. Nous avons également observé une population relativement jeune, majoritairement diplômée et expérimentée, principalement issue des domaines de la programmation, du management et du commerce.
+
+Ensuite, nous avons procédé à une série d'analyses de variance (ANOVA) pour évaluer l'impact de chaque variable sur les salaires. Les résultats ont montré que le genre, le niveau de diplôme, le poste et les années d'expérience ont tous un effet significatif sur les salaires. Cependant, une fois les autres variables contrôlées, le genre n'a plus été statistiquement significatif, ce qui suggère que d'autres facteurs expliquent davantage les disparités salariales observées.
+
+Enfin, nous avons réalisé une régression linéaire multiple pour modéliser l'effet cumulatif de toutes les variables sur les salaires. Les résultats ont confirmé l'importance du niveau de diplôme, des années d'expérience et du poste dans la détermination des salaires. Toutefois, le genre n'a pas été significatif dans ce modèle, ce qui indique que les différences de salaire observées entre les hommes et les femmes peuvent être expliquées par d'autres variables.
+
+En analysant les résidus de notre modèle, nous avons constaté une violation de l'hypothèse d'homoscédasticité, ce qui suggère une certaine faiblesse de notre régression linéaire. De plus, en comparant les différences de salaire entre hommes et femmes pour des profils similaires, nous avons observé des disparités significatives, notamment dans certains postes spécifiques.
+
+En conclusion, cette étude met en lumière l'importance de prendre en compte plusieurs variables dans l'analyse des disparités salariales, en particulier le niveau de diplôme, les années d'expérience et le poste occupé. Bien que le genre puisse ne pas être significatif une fois ces variables contrôlées, les différences de salaire entre hommes et femmes restent une réalité à considérer et à traiter dans le cadre de politiques visant à promouvoir l'équité salariale et l'égalité des chances sur le lieu de travail.
+
+Dans notre analyse, nous avons chercher à éviter soigneusement "l'erreur écologique". Par exemple, plutôt que d'inférer directement des relations au niveau agrégé, nous avons examiné chaque niveau d'éducation au sein de notre échantillon, comparant la distribution des salaires pour chaque groupe éducatif.
+
+En procédant ainsi, nous avons pu mettre en évidence des tendances significatives : par exemple, nous avons observé que les individus avec un niveau d'éducation supérieur tendent à avoir des salaires plus élevés en moyenne que ceux avec un niveau d'éducation inférieur. Cette conclusion est étayée par une analyse fine des données au niveau individuel, écartant ainsi toute extrapolation trompeuse basée sur des agrégats territoriaux.
+
+En respectant ce principe méthodologique, notre étude offre une compréhension précise et nuancée de la relation entre l'éducation et les salaires, éliminant ainsi le risque d'une interprétation erronée résultant de "l'erreur écologique". C'est dans le respect de ce même principe que nous préférons comparer ce qui est comparable plutôt que de tenter d'agréger tout les postes ensemble et ne pas réaliser que certains postes sont bien plus inégalitaires selon le genre que d'autres.
